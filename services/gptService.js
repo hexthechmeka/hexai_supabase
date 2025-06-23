@@ -4,10 +4,10 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-async function askGPT(prompt, model = 'gpt-3.5-turbo') {
+async function askGPT(messages, model = 'gpt-4') {
   const completion = await openai.chat.completions.create({
     model,
-    messages: [{ role: 'user', content: prompt }]
+    messages
   });
   return completion;
 }
