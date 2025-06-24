@@ -17,27 +17,25 @@ router.post('/gpt', async (req, res) => {
     const gptResponse = await askGPT(messages, model || 'gpt-4o');
     const choice = gptResponse.choices[0];
 
-    // DB에 대화 기록 저장
+    // DB에 대화 기록 저장 (에러는 서버 로그에만 기록, 클라이언트 응답에는 영향 X)
     const { error: dbError } = await supabase
       .from('gpt_history')
       .insert([{
-        // user_id는 현재 null (나중에 로그인 정보 연동 시 채움)
         user_id: null,
-        prompt: messages.map(m => m.content).join('\n'),  // 여러 messages를 하나로 합침
+        prompt: messages.map(m => m.content).join('\n'),
         response: choice.message.content,
         model: gptResponse.model,
         token_count: gptResponse.usage.total_tokens,
-        trigger_matched: detectTrigger(messages),  // trigger phrase 감지 결과
-        timestamp: new Date().toISOString()  // Supabase now()도 있지만, 명시적으로 ISO timestamp
+        trigger_matched: detectTrigger(messages),
+        timestamp: new Date().toISOString()
       }]);
 
     if (dbError) {
       console.error('DB insert error:', dbError);
-      // DB 에러가 있어도 GPT 응답은 반환
-      return res.json({ gptResponse, dbError: dbError.message });
+      // 클라이언트 응답에는 OpenAI 결과만 전달
     }
 
-    // GPT 응답 반환
+    // 항상 OpenAI 응답만 반환
     res.json(gptResponse);
 
   } catch (err) {
