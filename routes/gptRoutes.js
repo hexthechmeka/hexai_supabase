@@ -11,35 +11,64 @@ router.post('/gpt', async (req, res) => {
   }
 
   try {
-    // 🟢 cov_id 기반 DB history fetch (최신순 limit 10 for 안전성)
-    const { data: historyData, error: historyError } = await supabase
+    // 🔹 trimming용 최신 history 가져오기
+    const { data: trimmedHistory, error: trimmedError } = await supabase
       .from('gpt_history')
       .select('prompt, response')
       .eq('conversation_id', conversation_id)
       .order('timestamp', { ascending: true })
       .limit(10);
 
-    if (historyError) {
-      console.error('DB history fetch error:', historyError);
-    }
+    if (trimmedError) console.error('Trimmed history fetch error:', trimmedError);
 
-    // 🟢 contextMessages 구성
+    // 🔹 contextMessages 초기화
     const contextMessages = [];
-    if (historyData) {
-      historyData.forEach(item => {
-        contextMessages.push({ role: 'user', content: item.prompt });
-        contextMessages.push({ role: 'assistant', content: item.response });
+
+    if (trimmedHistory) {
+      trimmedHistory.forEach(row => {
+        contextMessages.push({ role: 'user', content: row.prompt });
+        contextMessages.push({ role: 'assistant', content: row.response });
       });
     }
 
-    // 🟢 새 질문 추가
+    // 🔹 keyword 추출
+    const extractKeyword = (message) => {
+      const match = message.match(/아까\s*(\S+)/) || message.match(/어제\s*(\S+)/);
+      return match ? match[1] : null;
+    };
+
+    const keyword = extractKeyword(messages.map(m => m.content).join(' '));
+    if (keyword) {
+      console.log("Detected keyword:", keyword);
+
+      const { data: keywordHistory, error: keywordError } = await supabase
+        .from('gpt_history')
+        .select('prompt, response')
+        .eq('user_id', user_id)
+        .or(`prompt.ilike.%${keyword}%,response.ilike.%${keyword}%`)
+        .order('timestamp', { ascending: true })
+        .limit(5);
+
+      if (keywordError) console.error('Keyword history fetch error:', keywordError);
+
+      if (keywordHistory) {
+        keywordHistory.forEach(row => {
+          contextMessages.push({ role: 'user', content: row.prompt });
+          contextMessages.push({ role: 'assistant', content: row.response });
+        });
+      }
+    }
+
+    // 🔹 새 질문 추가
     contextMessages.push(...messages);
 
-    // 🟢 GPT 호출
+    console.log("GPT 호출 context:", contextMessages);
+
+    // 🔹 GPT 호출
     const gptResponse = await askGPT(contextMessages, model || 'gpt-4o');
     const choice = gptResponse.choices[0];
 
-    // 🟢 DB insert
+    // 🔹 DB insert
     const { error: dbError } = await supabase
       .from('gpt_history')
       .insert([{
