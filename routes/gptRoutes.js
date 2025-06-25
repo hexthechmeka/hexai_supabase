@@ -1,27 +1,24 @@
 const express = require('express');
 const router = express.Router();
 const { askGPT } = require('../services/gptService');
-const supabase = require('../db');  // Supabase 클라이언트 연결
+const supabase = require('../db');
 
-// /gpt POST 엔드포인트
 router.post('/gpt', async (req, res) => {
-  const { messages, model } = req.body;
+  const { messages, model, conversation_id } = req.body;
 
-  // messages가 배열인지 확인
   if (!messages || !Array.isArray(messages)) {
     return res.status(400).json({ error: 'messages 배열이 필요합니다.' });
   }
 
   try {
-    // GPT API 호출
     const gptResponse = await askGPT(messages, model || 'gpt-4o');
     const choice = gptResponse.choices[0];
 
-    // DB에 대화 기록 저장 (에러는 서버 로그에만 기록, 클라이언트 응답에는 영향 X)
     const { error: dbError } = await supabase
       .from('gpt_history')
       .insert([{
         user_id: null,
+        conversation_id,
         prompt: messages.map(m => m.content).join('\n'),
         response: choice.message.content,
         model: gptResponse.model,
@@ -32,10 +29,8 @@ router.post('/gpt', async (req, res) => {
 
     if (dbError) {
       console.error('DB insert error:', dbError);
-      // 클라이언트 응답에는 OpenAI 결과만 전달
     }
 
-    // 항상 OpenAI 응답만 반환
     res.json(gptResponse);
 
   } catch (err) {
@@ -44,7 +39,6 @@ router.post('/gpt', async (req, res) => {
   }
 });
 
-// 간단한 trigger phrase 감지 함수
 function detectTrigger(messages) {
   const content = messages.map(m => m.content).join(' ').toLowerCase();
   if (content.includes('기억해줘')) {
