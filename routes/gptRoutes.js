@@ -4,43 +4,20 @@ const { askGPT } = require('../services/gptService');
 const supabase = require('../db');
 
 router.post('/gpt', async (req, res) => {
-  const { messages, model, conversation_id } = req.body;
+  const { messages, model, conversation_id, user_id } = req.body;
 
-  if (!messages || !Array.isArray(messages) || !conversation_id) {
-    return res.status(400).json({ error: 'messages 배열과 conversation_id가 필요합니다.' });
+  if (!messages || !Array.isArray(messages) || !conversation_id || !user_id) {
+    return res.status(400).json({ error: '필수 데이터 누락' });
   }
 
   try {
-    // DB에서 해당 cov_id의 대화 이력 불러오기 (최신순)
-    const { data: historyData, error: historyError } = await supabase
-      .from('gpt_history')
-      .select('prompt, response')
-      .eq('conversation_id', conversation_id)
-      .order('timestamp', { ascending: true });
-
-    if (historyError) {
-      console.error('DB history fetch error:', historyError);
-    }
-
-    // context 구성: 기존 history + 이번 messages
-    const contextMessages = [];
-    if (historyData) {
-      historyData.forEach(item => {
-        contextMessages.push({ role: 'user', content: item.prompt });
-        contextMessages.push({ role: 'assistant', content: item.response });
-      });
-    }
-    contextMessages.push(...messages);
-
-    // GPT API 호출
-    const gptResponse = await askGPT(contextMessages, model || 'gpt-4o');
+    const gptResponse = await askGPT(messages, model || 'gpt-4o');
     const choice = gptResponse.choices[0];
 
-    // DB insert
     const { error: dbError } = await supabase
       .from('gpt_history')
       .insert([{
-        user_id: null,
+        user_id,
         conversation_id,
         prompt: messages.map(m => m.content).join('\n'),
         response: choice.message.content,
