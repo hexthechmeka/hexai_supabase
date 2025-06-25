@@ -11,9 +11,35 @@ router.post('/gpt', async (req, res) => {
   }
 
   try {
-    const gptResponse = await askGPT(messages, model || 'gpt-4o');
+    // 🟢 cov_id 기반 DB history fetch (최신순 limit 10 for 안전성)
+    const { data: historyData, error: historyError } = await supabase
+      .from('gpt_history')
+      .select('prompt, response')
+      .eq('conversation_id', conversation_id)
+      .order('timestamp', { ascending: true })
+      .limit(10);
+
+    if (historyError) {
+      console.error('DB history fetch error:', historyError);
+    }
+
+    // 🟢 contextMessages 구성
+    const contextMessages = [];
+    if (historyData) {
+      historyData.forEach(item => {
+        contextMessages.push({ role: 'user', content: item.prompt });
+        contextMessages.push({ role: 'assistant', content: item.response });
+      });
+    }
+
+    // 🟢 새 질문 추가
+    contextMessages.push(...messages);
+
+    // 🟢 GPT 호출
+    const gptResponse = await askGPT(contextMessages, model || 'gpt-4o');
     const choice = gptResponse.choices[0];
 
+    // 🟢 DB insert
     const { error: dbError } = await supabase
       .from('gpt_history')
       .insert([{
