@@ -11,65 +11,36 @@ router.post('/gpt', async (req, res) => {
   }
 
   try {
-    // 🔹 trimming용 최신 history 가져오기
-    const { data: trimmedHistory, error: trimmedError } = await supabase
+    // 🔹 cov_id row count
+    const { count, error: countError } = await supabase
+      .from('gpt_history')
+      .select('*', { count: 'exact', head: true })
+      .eq('conversation_id', conversation_id);
+
+    if (countError) console.error('Count fetch error:', countError);
+    const isFirstMessage = (count === 0);
+
+    // 🔹 trimming
+    const { data: trimmedHistory } = await supabase
       .from('gpt_history')
       .select('prompt, response')
       .eq('conversation_id', conversation_id)
       .order('timestamp', { ascending: true })
       .limit(10);
 
-    if (trimmedError) console.error('Trimmed history fetch error:', trimmedError);
-
-    // 🔹 contextMessages 초기화
     const contextMessages = [];
-
-    if (trimmedHistory) {
-      trimmedHistory.forEach(row => {
-        contextMessages.push({ role: 'user', content: row.prompt });
-        contextMessages.push({ role: 'assistant', content: row.response });
-      });
-    }
-
-    // 🔹 keyword 추출
-    const extractKeyword = (message) => {
-      const match = message.match(/아까\s*(\S+)/) || message.match(/어제\s*(\S+)/);
-      return match ? match[1] : null;
-    };
-
-    const keyword = extractKeyword(messages.map(m => m.content).join(' '));
-    if (keyword) {
-      console.log("Detected keyword:", keyword);
-
-      const { data: keywordHistory, error: keywordError } = await supabase
-        .from('gpt_history')
-        .select('prompt, response')
-        .eq('user_id', user_id)
-        .or(`prompt.ilike.%${keyword}%,response.ilike.%${keyword}%`)
-        .order('timestamp', { ascending: true })
-        .limit(5);
-
-      if (keywordError) console.error('Keyword history fetch error:', keywordError);
-
-      if (keywordHistory) {
-        keywordHistory.forEach(row => {
-          contextMessages.push({ role: 'user', content: row.prompt });
-          contextMessages.push({ role: 'assistant', content: row.response });
-        });
-      }
-    }
-
-    // 🔹 새 질문 추가
+    trimmedHistory?.forEach(row => {
+      contextMessages.push({ role: 'user', content: row.prompt });
+      contextMessages.push({ role: 'assistant', content: row.response });
+    });
     contextMessages.push(...messages);
-
-    console.log("GPT 호출 context:", contextMessages);
 
     // 🔹 GPT 호출
     const gptResponse = await askGPT(contextMessages, model || 'gpt-4o');
     const choice = gptResponse.choices[0];
 
     // 🔹 DB insert
-    const { error: dbError } = await supabase
+    await supabase
       .from('gpt_history')
       .insert([{
         user_id,
@@ -82,8 +53,49 @@ router.post('/gpt', async (req, res) => {
         timestamp: new Date().toISOString()
       }]);
 
-    if (dbError) {
-      console.error('DB insert error:', dbError);
+    // 🔹 첫 메시지: 단순 title 생성
+    if (isFirstMessage) {
+      const simpleTitle = (
+        messages.map(m => m.content).join(' ') + ' ' + choice.message.content
+      ).slice(0, 30);
+
+      await supabase
+        .from('conversation_titles')
+        .insert([{
+          conversation_id,
+          user_id,
+          title: simpleTitle
+        }]);
+
+      console.log(`대화방 [${conversation_id}] title 생성: ${simpleTitle}`);
+    }
+
+    // 🔹 4쌍 이상 history → AI title 요약 시도
+    if ((count + 1) >= 4) {
+      const { data: fullHistory } = await supabase
+        .from('gpt_history')
+        .select('prompt, response')
+        .eq('conversation_id', conversation_id)
+        .order('timestamp', { ascending: true })
+        .limit(20);
+
+      const historyText = fullHistory.map(row =>
+        `Q: ${row.prompt} A: ${row.response}`
+      ).join('\n').slice(-1500);  // token limit 고려
+
+      const titleRes = await askGPT([
+        { role: 'system', content: '다음 대화를 30자 이내 대화방 제목으로 요약해줘.' },
+        { role: 'user', content: historyText }
+      ], model || 'gpt-4o');
+
+      const titleChoice = titleRes.choices[0].message.content.trim();
+
+      console.log(`대화방 [${conversation_id}] AI 요약 title: ${titleChoice}`);
+
+      await supabase
+        .from('conversation_titles')
+        .update({ title: titleChoice })
+        .eq('conversation_id', conversation_id);
     }
 
     res.json(gptResponse);
@@ -96,9 +108,7 @@ router.post('/gpt', async (req, res) => {
 
 function detectTrigger(messages) {
   const content = messages.map(m => m.content).join(' ').toLowerCase();
-  if (content.includes('기억해줘')) {
-    return '기억해줘';
-  }
+  if (content.includes('기억해줘')) return '기억해줘';
   return null;
 }
 
