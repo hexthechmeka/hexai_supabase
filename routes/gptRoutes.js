@@ -78,7 +78,7 @@ router.post('/gpt', async (req, res) => {
       }
     }
 
-    // 🔹 AI 요약 title (대화 3회 이상 시도)
+    // 🔹 AI 요약 title (대화 3회 이상 시도 → upsert)
     if ((count + 1) >= 3) {
       const { data: fullHistory } = await supabase
         .from('gpt_history')
@@ -106,15 +106,21 @@ router.post('/gpt', async (req, res) => {
 
       console.log(`AI title 최종 결과: ${titleChoice}`);
 
-      const updateTitleResult = await supabase
+      const upsertResult = await supabase
         .from('conversation_titles')
-        .update({ title: titleChoice })
-        .eq('conversation_id', conversation_id);
+        .upsert({
+          conversation_id,
+          user_id,
+          title: titleChoice
+        }, { onConflict: ['conversation_id'] })
+        .select();
 
-      if (updateTitleResult.error) {
-        console.error('Title update error:', updateTitleResult.error);
+      console.log('AI title upsert 적용 row:', upsertResult.data);
+
+      if (upsertResult.error) {
+        console.error('Title upsert error:', upsertResult.error);
       } else {
-        console.log('Title update success');
+        console.log('Title upsert success');
       }
     }
 
