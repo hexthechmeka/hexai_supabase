@@ -78,7 +78,7 @@ router.post('/gpt', async (req, res) => {
       }
     }
 
-    // 🔹 AI 요약 title (대화 3회 이상 시도 → upsert)
+    // 🔹 AI 요약 title (대화 3회 이상)
     if ((count + 1) >= 3) {
       const { data: fullHistory } = await supabase
         .from('gpt_history')
@@ -106,21 +106,30 @@ router.post('/gpt', async (req, res) => {
 
       console.log(`AI title 최종 결과: ${titleChoice}`);
 
-      const upsertResult = await supabase
+      // 🔹 update first
+      const updateRes = await supabase
         .from('conversation_titles')
-        .upsert({
-          conversation_id,
-          user_id,
-          title: titleChoice
-        }, { onConflict: ['conversation_id'] })
+        .update({ title: titleChoice })
+        .eq('conversation_id', conversation_id)
         .select();
 
-      console.log('AI title upsert 적용 row:', upsertResult.data);
-
-      if (upsertResult.error) {
-        console.error('Title upsert error:', upsertResult.error);
+      if (updateRes.error) {
+        console.error('AI title update error:', updateRes.error);
+      } else if (updateRes.data.length > 0) {
+        console.log('AI title update success:', updateRes.data);
       } else {
-        console.log('Title upsert success');
+        console.log('No row updated, trying insert');
+
+        const insertRes = await supabase
+          .from('conversation_titles')
+          .insert({ conversation_id, user_id, title: titleChoice })
+          .select();
+
+        if (insertRes.error) {
+          console.error('AI title insert error:', insertRes.error);
+        } else {
+          console.log('AI title insert success:', insertRes.data);
+        }
       }
     }
 
@@ -132,7 +141,7 @@ router.post('/gpt', async (req, res) => {
   }
 });
 
-// 🔹 title 생성 보조 함수
+// 🔹 보조 함수
 function generateSimpleTitle(messages) {
   const firstUser = messages.find(m => m.role === 'user')?.content || '';
   let title = firstUser.trim().replace(/\s+/g, ' ');
@@ -142,7 +151,6 @@ function generateSimpleTitle(messages) {
   return title;
 }
 
-// 🔹 trigger detect 보조 함수
 function detectTrigger(messages) {
   const content = messages.map(m => m.content).join(' ').toLowerCase();
   if (content.includes('기억해줘')) return '기억해줘';
