@@ -78,8 +78,8 @@ router.post('/gpt', async (req, res) => {
       }
     }
 
-    // 🔹 AI 요약 title update
-    if ((count + 1) >= 4) {
+    // 🔹 AI 요약 title (대화 3회 이상 시도)
+    if ((count + 1) >= 3) {
       const { data: fullHistory } = await supabase
         .from('gpt_history')
         .select('prompt, response')
@@ -94,14 +94,17 @@ router.post('/gpt', async (req, res) => {
       console.log('AI title 요청 text:', historyText);
 
       const titleRes = await askGPT([
-        { role: 'system', content: '다음 대화를 30자 이내 간결하고 직관적인 대화방 제목으로 요약해줘. 존칭이나 긴 문장은 피하고 핵심만 담아.' },
+        {
+          role: 'system',
+          content: '다음 대화를 한눈에 알아볼 15자 내외 제목으로 요약해줘. 절대 15자를 넘기지 마. 긴 문장, 존칭, 설명은 금지하고 핵심 키워드만 제공해.'
+        },
         { role: 'user', content: historyText }
       ], model || 'gpt-4o');
 
       let titleChoice = titleRes.choices[0].message.content.trim();
-      titleChoice = titleChoice.replace(/\s+/g, ' ').slice(0, 30);
+      titleChoice = titleChoice.replace(/\s+/g, ' ').slice(0, 15);
 
-      console.log(`AI title 응답 + trimming: ${titleChoice}`);
+      console.log(`AI title 최종 결과: ${titleChoice}`);
 
       const updateTitleResult = await supabase
         .from('conversation_titles')
