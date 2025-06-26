@@ -1,7 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const { askGPT } = require('../services/gptService');
-const supabase = require('../db');
+// Supabase client를 service_role key 기반으로 초기화 <==
+const { createClient } = require('@supabase/supabase-js');  // <==
+const SUPABASE_URL = process.env.SUPABASE_URL;             // <==
+const SERVICE_ROLE_KEY = process.env.SERVICE_ROLE_KEY;     // <==
+const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);  // <==
 
 router.post('/gpt', async (req, res) => {
   const { messages, model, conversation_id, user_id } = req.body;
@@ -11,7 +15,6 @@ router.post('/gpt', async (req, res) => {
   }
 
   try {
-    // 🔹 cov_id row count
     const { count, error: countError } = await supabase
       .from('gpt_history')
       .select('*', { count: 'exact', head: true })
@@ -21,7 +24,6 @@ router.post('/gpt', async (req, res) => {
     const isFirstMessage = (count === 0);
     console.log(`Count: ${count}, isFirstMessage: ${isFirstMessage}`);
 
-    // 🔹 trimming
     const { data: trimmedHistory } = await supabase
       .from('gpt_history')
       .select('prompt, response')
@@ -36,13 +38,11 @@ router.post('/gpt', async (req, res) => {
     });
     contextMessages.push(...messages);
 
-    // 🔹 GPT 호출
     console.log('GPT 호출 contextMessages:', contextMessages);
     const gptResponse = await askGPT(contextMessages, model || 'gpt-4o');
     const choice = gptResponse.choices[0];
     console.log('GPT 응답:', choice);
 
-    // 🔹 gpt_history insert
     const insertHistoryResult = await supabase
       .from('gpt_history')
       .insert([{
@@ -62,7 +62,6 @@ router.post('/gpt', async (req, res) => {
       console.log('History insert success');
     }
 
-    // 🔹 첫 메시지 title insert
     if (isFirstMessage) {
       const simpleTitle = generateSimpleTitle(messages);
       console.log(`Title insert 시도: ${simpleTitle}`);
@@ -78,7 +77,6 @@ router.post('/gpt', async (req, res) => {
       }
     }
 
-    // 🔹 AI 요약 title (대화 3회 이상)
     if ((count + 1) >= 3) {
       const { data: fullHistory } = await supabase
         .from('gpt_history')
@@ -106,7 +104,6 @@ router.post('/gpt', async (req, res) => {
 
       console.log(`AI title 최종 결과: ${titleChoice}`);
 
-      // 🔹 update first
       const updateRes = await supabase
         .from('conversation_titles')
         .update({ title: titleChoice })
@@ -141,7 +138,6 @@ router.post('/gpt', async (req, res) => {
   }
 });
 
-// 🔹 보조 함수
 function generateSimpleTitle(messages) {
   const firstUser = messages.find(m => m.role === 'user')?.content || '';
   let title = firstUser.trim().replace(/\s+/g, ' ');
