@@ -62,13 +62,9 @@ router.post('/gpt', async (req, res) => {
       console.log('History insert success');
     }
 
-    // 🔹 첫 메시지 title insert (보강 trimming)
+    // 🔹 첫 메시지 title insert
     if (isFirstMessage) {
-      const rawTitle = (
-        messages.map(m => m.content).join(' ') + ' ' + choice.message.content
-      ).slice(0, 50);
-      const simpleTitle = rawTitle.replace(/\s+/g, ' ').trim().slice(0, 30);
-
+      const simpleTitle = generateSimpleTitle(messages);
       console.log(`Title insert 시도: ${simpleTitle}`);
 
       const insertTitleResult = await supabase
@@ -82,7 +78,7 @@ router.post('/gpt', async (req, res) => {
       }
     }
 
-    // 🔹 AI 요약 title update (보강 trimming + prompt 개선)
+    // 🔹 AI 요약 title update
     if ((count + 1) >= 4) {
       const { data: fullHistory } = await supabase
         .from('gpt_history')
@@ -127,6 +123,17 @@ router.post('/gpt', async (req, res) => {
   }
 });
 
+// 🔹 title 생성 보조 함수
+function generateSimpleTitle(messages) {
+  const firstUser = messages.find(m => m.role === 'user')?.content || '';
+  let title = firstUser.trim().replace(/\s+/g, ' ');
+  if (title.length > 30) {
+    title = title.slice(0, 30) + '...';
+  }
+  return title;
+}
+
+// 🔹 trigger detect 보조 함수
 function detectTrigger(messages) {
   const content = messages.map(m => m.content).join(' ').toLowerCase();
   if (content.includes('기억해줘')) return '기억해줘';
